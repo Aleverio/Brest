@@ -1,0 +1,74 @@
+//! @user — handler event. Edit file ini untuk mengubah perilaku aplikasi.
+//! Export ulang tidak akan menimpanya.
+
+use crate::component::{Component, Event, NodeExt, State, Value, WidgetKind};
+
+pub fn handle(event: &Event, state: &mut State, component: &Component) {
+    match event {
+        Event::Hover(id) => state.hovered = *id,
+        Event::PointerDown(id) => {
+            state.pressed = Some(*id);
+            state.focused = Some(*id);
+            if let Some(node) = component.node(*id) {
+                if let crate::component::Kind::Widget(spec) = &node.kind {
+                    if let Some(key) = &spec.binding {
+                        match spec.kind {
+                            WidgetKind::Checkbox
+                            | WidgetKind::RadioButton
+                            | WidgetKind::Switch => {
+                                let next = !state.bool(key, false);
+                                state.set(key, Value::Bool(next));
+                            }
+                            WidgetKind::Button => {
+                                state.set(key, Value::Bool(true));
+                            }
+                            WidgetKind::Slider => {
+                                if state.get(key).is_none() {
+                                    state.set(key, Value::Number(0.5));
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            }
+        }
+        Event::PointerUp(_) => state.pressed = None,
+        Event::Key(_) => {}
+        Event::TextInput(id, text) => {
+            if let Some(node) = component.node(*id) {
+                if let crate::component::Kind::Widget(spec) = &node.kind {
+                    if let Some(key) = &spec.binding {
+                        let current = state.text(key).unwrap_or_default();
+                        let next = if text == "Backspace" {
+                            let mut chars: Vec<char> = current.chars().collect();
+                            chars.pop();
+                            chars.into_iter().collect()
+                        } else {
+                            format!("{current}{text}")
+                        };
+                        state.set(key, Value::Text(next));
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Contoh helper yang bisa dipakai handler lain: cari widget pertama dengan binding.
+pub fn find_bound_widget<'a>(component: &'a Component, key: &str) -> Option<&'a crate::component::Node> {
+    let mut found = None;
+    for root in &component.root {
+        root.walk(&mut |node| {
+            if found.is_some() {
+                return;
+            }
+            if let crate::component::Kind::Widget(spec) = &node.kind {
+                if spec.binding.as_deref() == Some(key) {
+                    found = Some(node);
+                }
+            }
+        });
+    }
+    found
+}

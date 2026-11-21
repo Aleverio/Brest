@@ -1,0 +1,20 @@
+//! Entry point hasil export. Seluruh perilaku ada di modul lain.
+//!
+//! Modul scaffolding sengaja mencakup semua widget/backend agar desain baru
+//! tidak perlu menambah modul. Variant yang belum dipakai diberi izin dead code.
+#![allow(dead_code)]
+
+#[cfg(test)]
+mod tests;
+
+mod app;
+mod caller;
+mod component;
+mod core;
+mod design;
+mod renderer;
+mod user;
+
+fn main() -> Result<(), app::AppError> {
+    app::run(design::build(), "{{DEFAULT_BACKEND}}")
+}

@@ -1,0 +1,285 @@
+//! @generated — modul `pemanggil`. Satu facade tanpa state: layout → draw list
+//! → renderer. Tidak pernah memiliki renderer, sehingga tidak ada siklus
+//! ketergantungan dengan `app`.
+
+pub mod layout;
+pub mod resolve;
+
+pub use layout::Layout;
+
+use crate::component::{Component, Kind, Node, NodeId, ShapeKind, State, WidgetKind};
+use crate::core::{Align, Color, Point, Rect, Size};
+use crate::renderer::{DrawCmd, DrawList, RenderError, Renderer};
+
+pub struct Caller;
+
+impl Caller {
+    pub fn layout(component: &Component, viewport: Size) -> Layout {
+        layout::compute(component, viewport)
+    }
+
+    pub fn hit_test(layout: &Layout, point: Point) -> Option<NodeId> {
+        layout::hit_test(layout, point)
+    }
+
+    pub fn draw_list(component: &Component, layout: &Layout, state: &State) -> DrawList {
+        let mut list = DrawList::default();
+        for root in &component.root {
+            if root.visible {
+                emit_node(root, component, layout, state, &mut list);
+            }
+        }
+        list
+    }
+
+    /// Render satu frame lengkap. Backend dipinjam hanya selama pemanggilan.
+    pub fn render(
+        renderer: &mut dyn Renderer,
+        component: &Component,
+        state: &State,
+        viewport: Size,
+    ) -> Result<crate::core::Frame, RenderError> {
+        let layout = Self::layout(component, viewport);
+        let list = Self::draw_list(component, &layout, state);
+        renderer.render(&list, viewport.clamped())
+    }
+}
+
+fn emit_node(node: &Node, component: &Component, layout: &Layout, state: &State, list: &mut DrawList) {
+    let Some(rect) = layout.get(node.id) else {
+        return;
+    };
+    let opacity = node.style.effective_opacity();
+    let hovered = state.is_hovered(node.id);
+    let pressed = state.is_pressed(node.id);
+
+    if let Some(bytes) = resolve::image_bytes(node.style.fill.as_ref(), &component.assets) {
+        list.push(DrawCmd::Image {
+            rect,
+            bytes,
+        });
+    } else if let Some(fill) = resolve::fill_color(node.style.fill.as_ref()) {
+        let fill = highlight(fill, hovered, pressed);
+        list.push(DrawCmd::Rect {
+            rect,
+            fill,
+            radius: node.style.corner_radius,
+            opacity,
+        });
+    }
+
+    if let Some(stroke) = resolve::fill_color(node.style.stroke.as_ref()) {
+        list.push(DrawCmd::StrokeRect {
+            rect,
+            stroke,
+            width: node.style.stroke_width.max(1.0),
+            radius: node.style.corner_radius,
+        });
+    }
+
+    match &node.kind {
+        Kind::Shape(ShapeKind::Ellipse) => {
+            if let Some(fill) = resolve::fill_color(node.style.fill.as_ref()) {
+                list.push(DrawCmd::Ellipse {
+                    rect,
+                    fill,
+                    opacity,
+                });
+            } else {
+                list.push(DrawCmd::Ellipse {
+                    rect,
+                    fill: Color::new(200, 200, 200, 255),
+                    opacity,
+                });
+            }
+        }
+        Kind::Shape(ShapeKind::Line) => list.push(DrawCmd::Line {
+            from: rect.origin,
+            to: Point::new(rect.right(), rect.bottom()),
+            stroke: resolve::fill_color(node.style.stroke.as_ref()).unwrap_or(Color::BLACK),
+            width: node.style.stroke_width.max(1.0),
+        }),
+        Kind::Shape(ShapeKind::Vector | ShapeKind::Rectangle) => {}
+        Kind::Frame(_) => {}
+        Kind::Image { .. } => {}
+        Kind::Text(spec) => list.push(DrawCmd::Text {
+            rect,
+            text: resolve::text(&spec.text, state),
+            size: spec.font_size,
+            color: spec.color,
+            bold: spec.bold,
+            align: spec.align,
+        }),
+        Kind::Widget(spec) => {
+            emit_widget(spec, rect, state, list);
+        }
+    }
+
+    for child in &node.children {
+        if child.visible {
+            emit_node(child, component, layout, state, list);
+        }
+    }
+}
+
+fn emit_widget(spec: &crate::component::WidgetSpec, rect: Rect, state: &State, list: &mut DrawList) {
+    let label = resolve::widget_label(spec, state);
+    let binding = spec.binding.as_deref();
+    let text_color = Color::new(30, 34, 40, 255);
+    let accent = Color::new(43, 110, 240, 255);
+
+    match &spec.kind {
+        WidgetKind::Checkbox | WidgetKind::RadioButton => {
+            let box_rect = Rect::new(rect.left(), rect.top() + rect.size.height * 0.2, rect.size.height * 0.6, rect.size.height * 0.6);
+            list.push(DrawCmd::StrokeRect {
+                rect: box_rect,
+                stroke: text_color,
+                width: 1.5,
+                radius: if matches!(spec.kind, WidgetKind::RadioButton) { box_rect.size.height / 2.0 } else { 3.0 },
+            });
+            if binding.is_some_and(|key| state.bool(key, false)) {
+                list.push(DrawCmd::Rect {
+                    rect: box_rect.shrink(4.0),
+                    fill: accent,
+                    radius: 2.0,
+                    opacity: 1.0,
+                });
+            }
+            list.push(DrawCmd::Text {
+                rect: Rect::new(rect.left() + rect.size.height * 0.8, rect.top(), rect.size.width - rect.size.height * 0.8, rect.size.height),
+                text: label,
+                size: 14.0,
+                color: text_color,
+                bold: false,
+                align: Align::Start,
+            });
+        }
+        WidgetKind::Switch => {
+            let track = Rect::new(rect.left(), rect.top() + rect.size.height * 0.25, rect.size.width, rect.size.height * 0.5);
+            let on = binding.is_some_and(|key| state.bool(key, false));
+            list.push(DrawCmd::Rect {
+                rect: track,
+                fill: if on { accent } else { Color::new(190, 195, 200, 255) },
+                radius: track.size.height / 2.0,
+                opacity: 1.0,
+            });
+            let knob_size = track.size.height - 4.0;
+            let knob_x = if on { track.right() - knob_size - 2.0 } else { track.left() + 2.0 };
+            list.push(DrawCmd::Ellipse {
+                rect: Rect::new(knob_x, track.top() + 2.0, knob_size, knob_size),
+                fill: Color::WHITE,
+                opacity: 1.0,
+            });
+        }
+        WidgetKind::Slider | WidgetKind::ProgressBar => {
+            let track = Rect::new(rect.left(), rect.top() + rect.size.height * 0.4, rect.size.width, rect.size.height * 0.2);
+            list.push(DrawCmd::Rect {
+                rect: track,
+                fill: Color::new(215, 220, 226, 255),
+                radius: track.size.height / 2.0,
+                opacity: 1.0,
+            });
+            let value = binding
+                .and_then(|key| state.get(key))
+                .and_then(|value| match value {
+                    crate::component::Value::Number(number) => Some(*number),
+                    _ => None,
+                })
+                .unwrap_or(0.5)
+                .clamp(0.0, 1.0);
+            list.push(DrawCmd::Rect {
+                rect: Rect::new(track.left(), track.top(), track.size.width * value, track.size.height),
+                fill: accent,
+                radius: track.size.height / 2.0,
+                opacity: 1.0,
+            });
+        }
+        WidgetKind::Dropdown | WidgetKind::ListBox | WidgetKind::Menu | WidgetKind::Tabs => {
+            list.push(DrawCmd::StrokeRect {
+                rect,
+                stroke: Color::new(190, 195, 200, 255),
+                width: 1.0,
+                radius: 6.0,
+            });
+            list.push(DrawCmd::Text {
+                rect: Rect::new(rect.left() + 8.0, rect.top(), rect.size.width - 24.0, rect.size.height),
+                text: label,
+                size: 14.0,
+                color: text_color,
+                bold: false,
+                align: Align::Start,
+            });
+            list.push(DrawCmd::Text {
+                rect: Rect::new(rect.right() - 20.0, rect.top(), 16.0, rect.size.height),
+                text: "v".into(),
+                size: 12.0,
+                color: text_color,
+                bold: false,
+                align: Align::Center,
+            });
+        }
+        WidgetKind::TextInput | WidgetKind::TextArea => {
+            list.push(DrawCmd::StrokeRect {
+                rect,
+                stroke: Color::new(170, 178, 188, 255),
+                width: 1.0,
+                radius: 4.0,
+            });
+            list.push(DrawCmd::Text {
+                rect: Rect::new(rect.left() + 8.0, rect.top(), rect.size.width - 16.0, rect.size.height),
+                text: label,
+                size: 14.0,
+                color: text_color,
+                bold: false,
+                align: Align::Start,
+            });
+        }
+        _ => {
+            list.push(DrawCmd::Text {
+                rect,
+                text: label,
+                size: 14.0,
+                color: text_color,
+                bold: matches!(spec.kind, WidgetKind::Button),
+                align: Align::Center,
+            });
+        }
+    }
+}
+
+/// Helpers lokal supaya caller tidak perlu mengimpor core::Rect::shrink.
+trait RectExt {
+    fn shrink(self, amount: f32) -> Self;
+}
+
+impl RectExt for Rect {
+    fn shrink(self, amount: f32) -> Self {
+        let half = amount.max(0.0) / 2.0;
+        Rect::new(
+            self.left() + half,
+            self.top() + half,
+            (self.size.width - amount).max(0.0),
+            (self.size.height - amount).max(0.0),
+        )
+    }
+}
+
+fn highlight(color: Color, hovered: bool, pressed: bool) -> Color {
+    let delta = if pressed { -18i16 } else if hovered { 14i16 } else { 0 };
+    let channel = |value: u8| (i16::from(value) + delta).clamp(0, 255) as u8;
+    Color::new(channel(color.r), channel(color.g), channel(color.b), color.a)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn draw_list_contains_text_command() {
+        let component = crate::design::build();
+        let layout = Caller::layout(&component, component.design_size);
+        let list = Caller::draw_list(&component, &layout, &State::new());
+        assert!(!list.commands.is_empty());
+        assert!(list.commands.iter().any(|cmd| matches!(cmd, DrawCmd::Text { .. })));
+    }
+}

@@ -15,6 +15,8 @@ workspace = true
 
 [dependencies]
 figcraft-plugin-sdk = { workspace = true }
-
-[dev-dependencies]
+figcraft-ir = { path = "../crates/figcraft-ir" }
+figcraft-import = { path = "../crates/figcraft-import" }
+figcraft-emit = { path = "../crates/figcraft-emit" }
+figcraft-zip = { path = "../crates/figcraft-zip" }
 serde_json = { workspace = true }

@@ -1,0 +1,14 @@
+[package]
+name = "figcraft-import"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Parse and normalise FigCraft node JSON into the versioned figcraft-ir"
+
+[lints]
+workspace = true
+
+[dependencies]
+figcraft-ir = { path = "../figcraft-ir" }
+serde_json = { workspace = true }

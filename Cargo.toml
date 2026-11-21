@@ -6,7 +6,14 @@
 
 [workspace]
 resolver = "3"
-members = ["sdk", "figcraft-rust-export"]
+members = [
+    "sdk",
+    "crates/figcraft-ir",
+    "crates/figcraft-import",
+    "crates/figcraft-emit",
+    "crates/figcraft-zip",
+    "figcraft-rust-export",
+]
 
 [workspace.package]
 version = "0.1.0"

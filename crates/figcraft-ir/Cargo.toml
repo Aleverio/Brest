@@ -1,0 +1,10 @@
+[package]
+name = "figcraft-ir"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Versioned intermediate representation between FigCraft and the Rust UI emitter"
+
+[lints]
+workspace = true

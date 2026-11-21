@@ -1,0 +1,17 @@
+[package]
+name = "figcraft-emit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Emit a standalone Rust UI project from figcraft-ir"
+
+[lints]
+workspace = true
+
+[dependencies]
+figcraft-ir = { path = "../figcraft-ir" }
+
+[dev-dependencies]
+figcraft-import = { path = "../figcraft-import" }
+serde_json = { workspace = true }

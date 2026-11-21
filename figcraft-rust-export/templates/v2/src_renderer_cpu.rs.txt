@@ -1,0 +1,104 @@
+//! @generated — backend CPU: rasterisasi perangkat lunak tanpa dependency.
+
+use super::font;
+use super::pixels::RgbaBuffer;
+use super::{Backend, DrawCmd, DrawList, RenderError, Renderer};
+use crate::core::{Align, Color, Frame, Rect, Size};
+
+#[derive(Debug, Default)]
+pub struct CpuRenderer {
+    buffer: RgbaBuffer,
+}
+
+impl CpuRenderer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl Renderer for CpuRenderer {
+    fn kind(&self) -> Backend {
+        Backend::Cpu
+    }
+
+    fn render(&mut self, list: &DrawList, size: Size) -> Result<Frame, RenderError> {
+        self.buffer = RgbaBuffer::new(size.width, size.height);
+        self.buffer.clear();
+        for command in &list.commands {
+            match command {
+                DrawCmd::Rect { rect, fill, radius, opacity } => {
+                    self.buffer.rect(*rect, *fill, *radius, *opacity);
+                }
+                DrawCmd::StrokeRect { rect, stroke, width, radius } => {
+                    let w = width.max(1.0);
+                    let sides = [
+                        Rect::new(rect.left(), rect.top(), rect.size.width, w),
+                        Rect::new(rect.left(), rect.bottom() - w, rect.size.width, w),
+                        Rect::new(rect.left(), rect.top(), w, rect.size.height),
+                        Rect::new(rect.right() - w, rect.top(), w, rect.size.height),
+                    ];
+                    for side in sides {
+                        self.buffer.rect(side, *stroke, *radius, 1.0);
+                    }
+                }
+                DrawCmd::Ellipse { rect, fill, opacity } => {
+                    self.buffer.ellipse(*rect, *fill, *opacity);
+                }
+                DrawCmd::Line { from, to, stroke, width } => {
+                    self.buffer.line(*from, *to, *stroke, *width);
+                }
+                DrawCmd::Text { rect, text, size, color, bold, align } => {
+                    let _ = bold;
+                    let scale = font::scale_for(*size);
+                    let text_width = font::measure(text, scale) as f32;
+                    let x = match align {
+                        Align::Start => rect.left(),
+                        Align::Center => rect.left() + (rect.size.width - text_width) / 2.0,
+                        Align::End => rect.right() - text_width,
+                    };
+                    let glyph_height = (7 * scale) as f32;
+                    let y = rect.top() + (rect.size.height - glyph_height).max(0.0) / 2.0;
+                    for (px, py) in font::rasterize(text, scale) {
+                        self.buffer.blend(x.round() as i32 + px, y.round() as i32 + py, *color, 1.0);
+                    }
+                }
+                DrawCmd::Image { rect, .. } => {
+                    // Tanpa decoder, CPU menggambar placeholder bergaris supaya
+                    // layout tetap terlihat. Skia membaca byte PNG asli.
+                    self.buffer.rect(*rect, Color::new(224, 224, 224, 255), 0.0, 1.0);
+                    let span = (rect.size.width + rect.size.height) / 16.0;
+                    for index in 0..span as i32 {
+                        let x = rect.left() + index as f32 * 16.0;
+                        self.buffer.line(
+                            crate::core::Point::new(x, rect.top()),
+                            crate::core::Point::new(x - rect.size.height, rect.bottom()),
+                            Color::new(180, 180, 180, 255),
+                            1.0,
+                        );
+                    }
+                }
+            }
+        }
+        Ok(self.buffer.as_frame())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_a_rect() {
+        let mut renderer = CpuRenderer::new();
+        let mut list = DrawList::new();
+        list.push(DrawCmd::Rect {
+            rect: Rect::new(0.0, 0.0, 2.0, 2.0),
+            fill: Color::new(255, 0, 0, 255),
+            radius: 0.0,
+            opacity: 1.0,
+        });
+        let frame = renderer.render(&list, Size::new(4.0, 4.0)).expect("render");
+        assert_eq!(&frame.pixels[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&frame.pixels[(2 * 4 + 2) * 4..(2 * 4 + 2) * 4 + 4], &[0, 0, 0, 0]);
+    }
+}

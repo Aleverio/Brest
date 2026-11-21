@@ -1,0 +1,35 @@
+# Aman untuk export ulang: ekstrak ZIP hasil export ke project ini, tetapi
+# JANGAN pernah menimpa src/user/** (kode milik Anda).
+#
+#   powershell -ExecutionPolicy Bypass -File .\sync.ps1 .\figcraft_design.zip
+#
+param([Parameter(Mandatory = $true)][string]$Zip)
+
+$ErrorActionPreference = 'Stop'
+$here = Split-Path -Parent $MyInvocation.MyCommand.Path
+$temporary = Join-Path ([System.IO.Path]::GetTempPath()) ("figcraft-sync-" + [guid]::NewGuid())
+New-Item -ItemType Directory -Path $temporary | Out-Null
+
+try {
+    Expand-Archive -LiteralPath $Zip -DestinationPath $temporary -Force
+    $source = Get-ChildItem -LiteralPath $temporary -Directory | Select-Object -First 1
+    if (-not $source) { throw 'ZIP tidak berisi folder project.' }
+
+    $copied = 0
+    Get-ChildItem -LiteralPath $source.FullName -Recurse -File | ForEach-Object {
+        $relative = $_.FullName.Substring($source.FullName.Length + 1)
+        if ($relative -replace '\\', '/' -like 'src/user/*') {
+            Write-Host "skip (milik user): $relative"
+            return
+        }
+        $destination = Join-Path $here $relative
+        $parent = Split-Path -Parent $destination
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+        Copy-Item -LiteralPath $_.FullName -Destination $destination -Force
+        $copied++
+    }
+    Write-Host "tersalin $copied file. src/user/ tidak disentuh."
+}
+finally {
+    Remove-Item -LiteralPath $temporary -Recurse -Force -ErrorAction SilentlyContinue
+}

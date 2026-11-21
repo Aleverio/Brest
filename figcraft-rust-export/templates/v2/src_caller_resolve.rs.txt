@@ -1,0 +1,76 @@
+//! @generated — resolusi nilai. Mengubah teks `{{key}}`, state, dan aset
+//! menjadi nilai konkret yang bisa dikirim ke renderer.
+
+use crate::component::{Asset, Paint, State, WidgetSpec};
+use crate::core::Color;
+
+/// Ganti semua `{{key}}` dengan nilai dari `State`. Key yang tidak ada
+/// dibiarkan apa adanya supaya mudah dilihat saat debugging.
+pub fn text(raw: &str, state: &State) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut rest = raw;
+    while let Some(start) = rest.find("{{") {
+        out.push_str(&rest[..start]);
+        let after = &rest[start + 2..];
+        match after.find("}}") {
+            Some(end) => {
+                let key = &after[..end];
+                match state.text(key) {
+                    Some(value) => out.push_str(&value),
+                    None => out.push_str(&rest[start..start + 2 + end + 2]),
+                }
+                rest = &after[end + 2..];
+            }
+            None => {
+                out.push_str(&rest[start..]);
+                return out;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+/// Teks yang ditampilkan sebuah widget: binding state mengalahkan label desain.
+pub fn widget_label(spec: &WidgetSpec, state: &State) -> String {
+    if let Some(key) = &spec.binding {
+        if let Some(value) = state.text(key) {
+            if !value.is_empty() {
+                return value;
+            }
+        }
+    }
+    spec.label
+        .as_deref()
+        .map(|label| text(label, state))
+        .unwrap_or_default()
+}
+
+pub fn fill_color(paint: Option<&Paint>) -> Option<Color> {
+    match paint {
+        Some(Paint::Solid(color)) => Some(*color),
+        Some(Paint::Unsupported(value)) => Some(value.fallback),
+        _ => None,
+    }
+}
+
+pub fn image_bytes(paint: Option<&Paint>, assets: &[Asset]) -> Option<Vec<u8>> {
+    let id = match paint {
+        Some(Paint::Image(id)) => *id,
+        _ => return None,
+    };
+    assets.iter().find(|asset| asset.id == id).map(|asset| asset.bytes.clone())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bindings_are_resolved() {
+        let mut state = State::new();
+        state.set("name", crate::component::Value::Text("Rust".into()));
+        assert_eq!(text("Halo {{name}}!", &state), "Halo Rust!");
+        assert_eq!(text("Halo {{missing}}", &state), "Halo {{missing}}");
+    }
+}

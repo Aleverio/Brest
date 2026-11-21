@@ -1,0 +1,16 @@
+use crate::caller::Caller;
+use crate::component::State;
+use crate::renderer::{Backend, create};
+
+#[cfg(feature = "cpu")]
+#[test]
+fn cpu_backend_produces_a_frame() {
+    let component = crate::design::build();
+    let mut renderer = create(Backend::Cpu).expect("cpu backend is compiled");
+    let frame = Caller::render(&mut *renderer, &component, &State::new(), component.design_size)
+        .expect("render succeeds");
+    assert_eq!(frame.width(), component.design_size.width as usize);
+    assert_eq!(frame.height(), component.design_size.height as usize);
+    assert_eq!(frame.pixels.len(), frame.width() * frame.height() * 4);
+    assert!(!frame.png().is_empty());
+}

@@ -1,0 +1,24 @@
+[package]
+name = "{{CRATE}}"
+version = "0.1.0"
+edition = "2024"
+
+# Stand on its own, even when unzipped inside another Cargo workspace.
+[workspace]
+
+# All backends are compiled by default and chosen at runtime with
+# `--backend cpu|skia|gpu`. Disable features for a lighter build, e.g.
+#   cargo run --no-default-features --features "cpu,ui"
+[features]
+default = ["cpu", "skia", "gpu", "ui"]
+cpu = []
+skia = ["dep:skia-safe"]
+gpu = ["dep:wgpu", "dep:pollster"]
+ui = ["dep:winit", "dep:softbuffer"]
+
+[dependencies]
+skia-safe = { version = "0.81", optional = true }
+wgpu = { version = "0.19", optional = true }
+pollster = { version = "0.3", optional = true }
+winit = { version = "0.30", optional = true }
+softbuffer = { version = "0.4", optional = true }

@@ -1,0 +1,414 @@
+//! @generated — shell aplikasi. Event masuk, state berubah, frame keluar.
+//! Tidak ada logika layout atau gambar di sini.
+
+use crate::caller::Caller;
+use crate::component::{Component, State};
+use crate::core::Frame;
+use crate::renderer::{Backend, RenderError};
+use std::fmt;
+
+#[cfg(feature = "ui")]
+use crate::component::Event;
+#[cfg(feature = "ui")]
+use crate::core::{Point, Size};
+#[cfg(feature = "ui")]
+use crate::renderer::Renderer;
+#[cfg(feature = "ui")]
+use crate::user::handlers;
+#[cfg(feature = "ui")]
+use std::num::NonZeroU32;
+#[cfg(feature = "ui")]
+use std::sync::Arc;
+
+#[cfg(feature = "ui")]
+use winit::application::ApplicationHandler;
+#[cfg(feature = "ui")]
+use winit::dpi::LogicalSize;
+#[cfg(feature = "ui")]
+use winit::event::{ElementState, MouseButton, WindowEvent};
+#[cfg(feature = "ui")]
+use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
+#[cfg(feature = "ui")]
+use winit::keyboard::{Key, NamedKey};
+#[cfg(feature = "ui")]
+use winit::window::{Window, WindowId};
+
+const BACKGROUND: u32 = 0x0012_1619;
+
+#[derive(Debug)]
+pub enum AppError {
+    Render(RenderError),
+    Window(String),
+    Io(String),
+    Args(String),
+}
+
+impl fmt::Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Render(error) => write!(f, "render: {error}"),
+            Self::Window(message) => write!(f, "window: {message}"),
+            Self::Io(message) => write!(f, "I/O: {message}"),
+            Self::Args(message) => write!(f, "arguments: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for AppError {}
+
+impl From<RenderError> for AppError {
+    fn from(error: RenderError) -> Self {
+        Self::Render(error)
+    }
+}
+
+struct Args {
+    png: Option<String>,
+    frames: Option<u32>,
+}
+
+fn parse_args() -> Result<Args, AppError> {
+    let mut png = None;
+    let mut frames = None;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--png" => {
+                png = Some(args.next().unwrap_or_else(|| "figcraft_design.png".into()));
+            }
+            "--frames" => {
+                let value = args
+                    .next()
+                    .ok_or_else(|| AppError::Args("--frames needs a number".into()))?;
+                frames = Some(value.parse().map_err(|_| AppError::Args(format!("invalid --frames value '{value}'")))?);
+            }
+            "--backend" => {
+                let _ = args.next();
+            }
+            "--help" | "-h" => {
+                println!(
+                    "Usage: {} [--backend cpu|skia|gpu] [--png [path]] [--frames N]\n\n\
+                     Without an option a desktop window opens (needs the `ui` feature).\n\
+                     --png renders one frame and writes a PNG.\n\
+                     --frames N renders N frames offscreen and exits (smoke test).",
+                    std::env::args().next().unwrap_or_else(|| "app".into())
+                );
+                std::process::exit(0);
+            }
+            other => return Err(AppError::Args(format!("unknown option '{other}' (try --help)"))),
+        }
+    }
+    Ok(Args { png, frames })
+}
+
+/// Entry point dipakai `main.rs`.
+pub fn run(component: Component, default_backend: &str) -> Result<(), AppError> {
+    let backend = Backend::from_args_or_default(default_backend)?;
+    let args = parse_args()?;
+    let mut renderer = crate::renderer::create(backend)?;
+    let state = State::with_bindings(component.bindings());
+
+    if let Some(path) = args.png {
+        let frame = Caller::render(&mut *renderer, &component, &state, component.design_size)?;
+        std::fs::write(&path, frame.png()).map_err(|error| AppError::Io(format!("{path}: {error}")))?;
+        println!("wrote {path}");
+        return Ok(());
+    }
+
+    if let Some(frames) = args.frames {
+        for _ in 0..frames {
+            let _ = Caller::render(&mut *renderer, &component, &state, component.design_size)?;
+        }
+        println!("rendered {frames} frame(s) with the {} backend", backend.as_str());
+        return Ok(());
+    }
+
+    #[cfg(feature = "ui")]
+    return run_window(component, state, renderer, backend);
+
+    #[cfg(not(feature = "ui"))]
+    {
+        let path = "figcraft_design.png";
+        let frame = Caller::render(&mut *renderer, &component, &state, component.design_size)?;
+        std::fs::write(path, frame.png()).map_err(|error| AppError::Io(format!("{path}: {error}")))?;
+        println!("the `ui` feature is disabled; wrote {path} instead");
+        Ok(())
+    }
+}
+
+#[cfg(feature = "ui")]
+fn run_window(
+    component: Component,
+    state: State,
+    renderer: Box<dyn Renderer>,
+    backend: Backend,
+) -> Result<(), AppError> {
+    let event_loop = EventLoop::new().map_err(|error| AppError::Window(error.to_string()))?;
+    event_loop.set_control_flow(ControlFlow::Wait);
+    let mut app = App {
+        component,
+        state,
+        renderer,
+        backend,
+        window: None,
+        context: None,
+        surface: None,
+        frame: None,
+        cursor: Point::default(),
+        error: None,
+    };
+    event_loop
+        .run_app(&mut app)
+        .map_err(|error| AppError::Window(error.to_string()))?;
+    match app.error {
+        Some(error) => Err(AppError::Window(error)),
+        None => Ok(()),
+    }
+}
+
+#[cfg(feature = "ui")]
+struct App {
+    component: Component,
+    state: State,
+    renderer: Box<dyn Renderer>,
+    backend: Backend,
+    window: Option<Arc<Window>>,
+    context: Option<softbuffer::Context<Arc<Window>>>,
+    surface: Option<softbuffer::Surface<Arc<Window>, Arc<Window>>>,
+    frame: Option<Frame>,
+    cursor: Point,
+    error: Option<String>,
+}
+
+#[cfg(feature = "ui")]
+impl App {
+    fn fail(&mut self, event_loop: &ActiveEventLoop, error: String) {
+        self.error = Some(error);
+        event_loop.exit();
+    }
+
+    fn dispatch(&mut self, event: Event) {
+        handlers::handle(&event, &mut self.state, &self.component);
+        self.frame = None;
+        if let Some(window) = &self.window {
+            window.request_redraw();
+        }
+    }
+
+    fn present(&mut self) -> Result<(), String> {
+        let window = self.window.as_ref().ok_or("no window")?;
+        let size = window.inner_size();
+        let (Some(raw_width), Some(raw_height)) = (NonZeroU32::new(size.width), NonZeroU32::new(size.height)) else {
+            return Ok(()); // minimised
+        };
+        if self.frame.is_none() {
+            self.frame = Some(
+                Caller::render(
+                    &mut *self.renderer,
+                    &self.component,
+                    &self.state,
+                    Size::new(raw_width.get() as f32, raw_height.get() as f32),
+                )
+                .map_err(|error| format!("render failed: {error}"))?,
+            );
+        }
+        let frame = self.frame.as_ref().ok_or("frame was not rendered")?;
+        let surface = self.surface.as_mut().ok_or("no window surface")?;
+        surface
+            .resize(raw_width, raw_height)
+            .map_err(|error| format!("surface resize: {error}"))?;
+        let mut buffer = surface
+            .buffer_mut()
+            .map_err(|error| format!("surface buffer: {error}"))?;
+        blit(&mut buffer, raw_width.get(), raw_height.get(), frame, BACKGROUND);
+        buffer.present().map_err(|error| format!("present: {error}"))
+    }
+
+    fn save_png(&mut self) {
+        if self.frame.is_none() {
+            match Caller::render(&mut *self.renderer, &self.component, &self.state, self.component.design_size) {
+                Ok(frame) => self.frame = Some(frame),
+                Err(error) => {
+                    eprintln!("render failed: {error}");
+                    return;
+                }
+            }
+        }
+        let path = format!("{}.png", self.component.name);
+        if let Some(frame) = &self.frame {
+            match std::fs::write(&path, frame.png()) {
+                Ok(()) => println!("wrote {path}"),
+                Err(error) => eprintln!("could not write {path}: {error}"),
+            }
+        }
+    }
+}
+
+#[cfg(feature = "ui")]
+impl ApplicationHandler for App {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.window.is_some() {
+            return;
+        }
+        let title = format!(
+            "{} — {} | R redraw, S save PNG, Esc quit",
+            self.component.name,
+            self.backend.as_str()
+        );
+        let attributes = Window::default_attributes()
+            .with_title(title)
+            .with_inner_size(LogicalSize::new(
+                f64::from(self.component.design_size.width.max(160.0)),
+                f64::from(self.component.design_size.height.max(120.0)),
+            ))
+            .with_min_inner_size(LogicalSize::new(160.0, 120.0));
+        let window = match event_loop.create_window(attributes) {
+            Ok(window) => Arc::new(window),
+            Err(error) => return self.fail(event_loop, format!("could not create a window: {error}")),
+        };
+        let context = match softbuffer::Context::new(window.clone()) {
+            Ok(context) => context,
+            Err(error) => return self.fail(event_loop, format!("softbuffer context: {error}")),
+        };
+        let surface = match softbuffer::Surface::new(&context, window.clone()) {
+            Ok(surface) => surface,
+            Err(error) => return self.fail(event_loop, format!("softbuffer surface: {error}")),
+        };
+        self.window = Some(window);
+        self.context = Some(context);
+        self.surface = Some(surface);
+        self.window.as_ref().map(|window| window.request_redraw());
+    }
+
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+        if self.window.as_ref().map(|window| window.id()) != Some(window_id) {
+            return;
+        }
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::RedrawRequested => match self.present() {
+                Ok(()) => {}
+                Err(error) => self.fail(event_loop, error),
+            },
+            WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
+                self.frame = None;
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = Point::new(position.x as f32, position.y as f32);
+                // Hit-test memakai viewport window yang sebenarnya; dihitung ulang
+                // di sini agar state hover mengikuti ukuran jendela.
+                let size = self.window.as_ref().map(|window| window.inner_size());
+                if let Some(size) = size {
+                    let layout = Caller::layout(
+                        &self.component,
+                        Size::new(size.width as f32, size.height as f32),
+                    );
+                    let hit = Caller::hit_test(&layout, self.cursor);
+                    self.dispatch(Event::Hover(hit));
+                }
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                let size = self.window.as_ref().map(|window| window.inner_size());
+                if let Some(size) = size {
+                    let layout = Caller::layout(
+                        &self.component,
+                        Size::new(size.width as f32, size.height as f32),
+                    );
+                    if let Some(id) = Caller::hit_test(&layout, self.cursor) {
+                        self.dispatch(Event::PointerDown(id));
+                        self.dispatch(Event::PointerUp(id));
+                    }
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } if event.state.is_pressed() && !event.repeat => {
+                match &event.logical_key {
+                    Key::Named(NamedKey::Escape) => event_loop.exit(),
+                    Key::Character(key) if key.eq_ignore_ascii_case("r") => {
+                        self.frame = None;
+                        if let Some(window) = &self.window {
+                            window.request_redraw();
+                        }
+                    }
+                    Key::Character(key) if key.eq_ignore_ascii_case("s") => self.save_png(),
+                    Key::Character(key) => {
+                        if let Some(focused) = self.state.focused {
+                            self.dispatch(Event::TextInput(focused, key.to_string()));
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Salin frame RGBA8 ke buffer 0RGB softbuffer, dengan letterboxing.
+fn blit(destination: &mut [u32], destination_width: u32, destination_height: u32, frame: &Frame, background: u32) {
+    destination.fill(background);
+    if frame.width() == 0 || frame.height() == 0 || destination_width == 0 || destination_height == 0 {
+        return;
+    }
+    let scale = (f64::from(destination_width) / frame.width() as f64)
+        .min(f64::from(destination_height) / frame.height() as f64);
+    let target_width = (frame.width() as f64 * scale).round().max(1.0) as u32;
+    let target_height = (frame.height() as f64 * scale).round().max(1.0) as u32;
+    let offset_x = (destination_width - target_width) / 2;
+    let offset_y = (destination_height - target_height) / 2;
+
+    for y in 0..target_height {
+        let source_y = u64::from(y) * frame.height() as u64 / u64::from(target_height);
+        let source_row = source_y as usize * frame.width() * 4;
+        let destination_row = (offset_y + y) as usize * destination_width as usize;
+        for x in 0..target_width {
+            let source_x = u64::from(x) * frame.width() as u64 / u64::from(target_width);
+            let index = source_row + source_x as usize * 4;
+            destination[destination_row + (offset_x + x) as usize] = composite(
+                frame.pixels[index],
+                frame.pixels[index + 1],
+                frame.pixels[index + 2],
+                frame.pixels[index + 3],
+                background,
+            );
+        }
+    }
+}
+
+fn composite(red: u8, green: u8, blue: u8, alpha: u8, background: u32) -> u32 {
+    let alpha = u32::from(alpha);
+    let inverse = 255 - alpha;
+    let mix = |source: u8, shift: u32| {
+        let base = (background >> shift) & 0xFF;
+        ((u32::from(source) * alpha + base * inverse) / 255) & 0xFF
+    };
+    (mix(red, 16) << 16) | (mix(green, 8) << 8) | mix(blue, 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn frame(width: u32, height: u32, rgba: [u8; 4]) -> Frame {
+        Frame {
+            size: Size::new(width as f32, height as f32),
+            pixels: rgba.repeat(width as usize * height as usize),
+        }
+    }
+
+    #[test]
+    fn blit_centres_and_letterboxes() {
+        let mut buffer = vec![0u32; 10 * 10];
+        blit(&mut buffer, 10, 10, &frame(2, 1, [255, 0, 0, 255]), 0);
+        assert_eq!(buffer[0], 0);
+        assert_eq!(buffer[2 * 10], 0x00FF_0000);
+        assert_eq!(buffer[6 * 10 + 9], 0x00FF_0000);
+        assert_eq!(buffer[7 * 10], 0);
+    }
+}

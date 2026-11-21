@@ -1,0 +1,26 @@
+# Generated files
+
+File berikut dibuat oleh **{{GENERATOR}} v{{GENERATOR_VERSION}}** dan akan
+ditimpa setiap kali project di-export ulang. Jangan taruh logika bisnis di sini.
+
+- `Cargo.toml`
+- `README.md`
+- `GENERATED.md`
+- `src/main.rs`
+- `src/core.rs`
+- `src/app.rs`
+- `src/component/**`
+- `src/caller/**`
+- `src/renderer/**`
+- `src/design/**`
+- `src/tests/**`
+
+File berikut **milik Anda** dan tidak akan pernah ditimpa:
+
+- `src/user/mod.rs`
+- `src/user/handlers.rs`
+- `assets/**` (kecuali aset dengan nama yang sama persis dari FigCraft)
+- file lain yang Anda tambahkan sendiri
+
+Simpan kustomisasi di `src/user/handlers.rs` atau modul baru yang Anda daftarkan
+dari sana.

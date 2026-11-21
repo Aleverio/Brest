@@ -1,0 +1,4 @@
+//! @generated — test internal untuk project hasil export.
+
+mod layout;
+mod render;

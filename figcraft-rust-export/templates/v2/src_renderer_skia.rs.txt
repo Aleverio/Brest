@@ -1,0 +1,139 @@
+//! @generated — backend Skia: kanvas 2D nyata, hasil akhir tetap `Frame`.
+
+use super::font;
+use super::{Backend, DrawCmd, DrawList, RenderError, Renderer};
+use crate::core::{Align, Color, Frame, Rect, Size};
+use skia_safe::{AlphaType, Color4f, ColorType, Data, ImageInfo, Paint, Rect as SkRect, Surface};
+
+#[derive(Debug, Default)]
+pub struct SkiaRenderer {
+    surface: Option<Surface>,
+}
+
+impl SkiaRenderer {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn canvas(&mut self) -> Result<&skia_safe::Canvas, RenderError> {
+        self.surface
+            .as_mut()
+            .map(Surface::canvas)
+            .ok_or_else(|| RenderError::Message("Skia surface is not ready".into()))
+    }
+}
+
+fn paint(color: Color, opacity: f32) -> Paint {
+    let alpha = (f32::from(color.a) / 255.0 * opacity.clamp(0.0, 1.0)).clamp(0.0, 1.0);
+    Paint::new(
+        Color4f::new(
+            f32::from(color.r) / 255.0,
+            f32::from(color.g) / 255.0,
+            f32::from(color.b) / 255.0,
+            alpha,
+        ),
+        None,
+    )
+}
+
+fn sk_rect(rect: Rect) -> SkRect {
+    SkRect::new(
+        rect.left(),
+        rect.top(),
+        rect.right(),
+        rect.bottom(),
+    )
+}
+
+fn radius(rect: Rect, value: f32) -> f32 {
+    value.max(0.0).min(rect.size.width.min(rect.size.height) / 2.0)
+}
+
+impl Renderer for SkiaRenderer {
+    fn kind(&self) -> Backend {
+        Backend::Skia
+    }
+
+    fn render(&mut self, list: &DrawList, size: Size) -> Result<Frame, RenderError> {
+        let size = size.clamped();
+        let width = size.width as i32;
+        let height = size.height as i32;
+        let info = ImageInfo::new((width, height), ColorType::RGBA8888, AlphaType::Premul, None);
+        let mut surface = skia_safe::surfaces::raster(&info, None, None)
+            .ok_or_else(|| RenderError::Message("could not create a Skia surface".into()))?;
+        surface.canvas().clear(Color4f::new(0.0, 0.0, 0.0, 0.0));
+
+        for command in &list.commands {
+            match command {
+                DrawCmd::Rect { rect, fill, radius: corner, opacity } => {
+                    let p = paint(*fill, *opacity);
+                    let r = radius(*rect, *corner);
+                    if r > 0.0 {
+                        surface.canvas().draw_round_rect(sk_rect(*rect), r, r, &p);
+                    } else {
+                        surface.canvas().draw_rect(sk_rect(*rect), &p);
+                    }
+                }
+                DrawCmd::StrokeRect { rect, stroke, width, radius: corner } => {
+                    let mut p = paint(*stroke, 1.0);
+                    p.set_stroke(true);
+                    p.set_stroke_width(width.max(1.0));
+                    let r = radius(*rect, *corner);
+                    if r > 0.0 {
+                        surface.canvas().draw_round_rect(sk_rect(*rect), r, r, &p);
+                    } else {
+                        surface.canvas().draw_rect(sk_rect(*rect), &p);
+                    }
+                }
+                DrawCmd::Ellipse { rect, fill, opacity } => {
+                    surface.canvas().draw_oval(sk_rect(*rect), &paint(*fill, *opacity));
+                }
+                DrawCmd::Line { from, to, stroke, width } => {
+                    let mut p = paint(*stroke, 1.0);
+                    p.set_stroke(true);
+                    p.set_stroke_width(width.max(1.0));
+                    surface.canvas().draw_line((from.x, from.y), (to.x, to.y), &p);
+                }
+                DrawCmd::Text { rect, text, size, color, bold: _, align } => {
+                    let scale = font::scale_for(*size);
+                    let text_width = font::measure(text, scale) as f32;
+                    let x = match align {
+                        Align::Start => rect.left(),
+                        Align::Center => rect.left() + (rect.size.width - text_width) / 2.0,
+                        Align::End => rect.right() - text_width,
+                    };
+                    let glyph_height = (7 * scale) as f32;
+                    let y = rect.top() + (rect.size.height - glyph_height).max(0.0) / 2.0;
+                    let p = paint(*color, 1.0);
+                    for (px, py) in font::rasterize(text, scale) {
+                        let left = x + px as f32;
+                        let top = y + py as f32;
+                        surface.canvas().draw_rect(SkRect::new(left, top, left + 1.0, top + 1.0), &p);
+                    }
+                }
+                DrawCmd::Image { rect, bytes } => {
+                    let mut codec = skia_safe::Codec::from_data(Data::new_copy(bytes))
+                        .ok_or_else(|| RenderError::Message("could not decode an image asset".into()))?;
+                    let image = codec
+                        .get_image(None, None)
+                        .map_err(|_| RenderError::Message("could not decode an image asset".into()))?;
+                    surface.canvas().draw_image_rect(
+                        image,
+                        None,
+                        sk_rect(*rect),
+                        &paint(Color::WHITE, 1.0),
+                    );
+                }
+            }
+        }
+
+        let mut frame = Frame::new(size);
+        let read_info = ImageInfo::new((width, height), ColorType::RGBA8888, AlphaType::Unpremul, None);
+        let row_bytes = width as usize * 4;
+        if !surface.read_pixels(&read_info, &mut frame.pixels, row_bytes, (0, 0)) {
+            return Err(RenderError::Message("Skia pixel readback failed".into()));
+        }
+        self.surface = Some(surface);
+        Ok(frame)
+    }
+}

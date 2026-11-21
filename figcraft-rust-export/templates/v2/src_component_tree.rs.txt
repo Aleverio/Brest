@@ -1,0 +1,39 @@
+//! @generated — helper traversal pohon. Murni, tanpa efek samping.
+
+use super::{Node, NodeId};
+
+pub trait NodeExt {
+    fn walk<'a>(&'a self, visit: &mut dyn FnMut(&'a Node));
+    fn find(&self, id: NodeId) -> Option<&Node>;
+    fn count(&self) -> usize;
+    fn walk_mut(&mut self, visit: &mut dyn FnMut(&mut Node));
+}
+
+impl NodeExt for Node {
+    fn walk<'a>(&'a self, visit: &mut dyn FnMut(&'a Node)) {
+        visit(self);
+        for child in &self.children {
+            child.walk(visit);
+        }
+    }
+
+    fn find(&self, id: NodeId) -> Option<&Node> {
+        if self.id == id {
+            return Some(self);
+        }
+        self.children.iter().find_map(|child| child.find(id))
+    }
+
+    fn count(&self) -> usize {
+        let mut total = 0;
+        self.walk(&mut |_| total += 1);
+        total
+    }
+
+    fn walk_mut(&mut self, visit: &mut dyn FnMut(&mut Node)) {
+        visit(self);
+        for child in &mut self.children {
+            child.walk_mut(visit);
+        }
+    }
+}

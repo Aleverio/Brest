@@ -1,0 +1,295 @@
+//! @generated — modul `komponen`. Hanya data dan aturan pohon; tidak ada kode
+//! yang menyentuh piksel maupun jendela.
+
+pub mod state;
+pub mod tree;
+
+pub use state::{Event, State, Value};
+pub use tree::NodeExt;
+
+pub use crate::core::{Align, Axis, Color, Point, Rect, Size};
+
+pub type NodeId = u64;
+pub type AssetId = u32;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Paint {
+    Solid(Color),
+    Image(AssetId),
+    Unsupported(UnsupportedPaint),
+}
+
+impl Paint {
+    pub fn color(&self) -> Color {
+        match self {
+            Self::Solid(color) => *color,
+            Self::Unsupported(value) => value.fallback,
+            Self::Image(_) => Color::TRANSPARENT,
+        }
+    }
+}
+
+/// A paint FigCraft understands but this generator cannot reproduce exactly.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UnsupportedPaint {
+    pub kind: String,
+    pub fallback: Color,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Padding {
+    pub top: f32,
+    pub right: f32,
+    pub bottom: f32,
+    pub left: f32,
+}
+
+impl Padding {
+    pub const fn uniform(value: f32) -> Self {
+        Self {
+            top: value,
+            right: value,
+            bottom: value,
+            left: value,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Style {
+    pub fill: Option<Paint>,
+    pub stroke: Option<Paint>,
+    pub stroke_width: f32,
+    pub corner_radius: f32,
+    pub opacity: f32,
+    pub clips_content: bool,
+}
+
+impl Style {
+    pub fn effective_opacity(&self) -> f32 {
+        self.opacity.clamp(0.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShapeKind {
+    Rectangle,
+    Ellipse,
+    Line,
+    Vector,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TextAlignVertical {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextSpec {
+    pub text: String,
+    pub font_family: String,
+    pub font_size: f32,
+    pub bold: bool,
+    pub italic: bool,
+    pub align: Align,
+    pub vertical_align: TextAlignVertical,
+    pub line_height: f32,
+    pub color: Color,
+    pub bindings: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FrameSpec {
+    pub layout: Axis,
+    pub gap: f32,
+    pub padding: Padding,
+    pub align: Align,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WidgetKind {
+    Button,
+    TextInput,
+    TextArea,
+    Checkbox,
+    RadioButton,
+    Switch,
+    Slider,
+    ProgressBar,
+    Dropdown,
+    ListBox,
+    Menu,
+    MenuItem,
+    Tabs,
+    TabItem,
+    Tooltip,
+    Modal,
+    Accordion,
+    Custom(String),
+}
+
+impl WidgetKind {
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Button => "Button",
+            Self::TextInput => "TextInput",
+            Self::TextArea => "TextArea",
+            Self::Checkbox => "Checkbox",
+            Self::RadioButton => "RadioButton",
+            Self::Switch => "Switch",
+            Self::Slider => "Slider",
+            Self::ProgressBar => "ProgressBar",
+            Self::Dropdown => "Dropdown",
+            Self::ListBox => "ListBox",
+            Self::Menu => "Menu",
+            Self::MenuItem => "MenuItem",
+            Self::Tabs => "Tabs",
+            Self::TabItem => "TabItem",
+            Self::Tooltip => "Tooltip",
+            Self::Modal => "Modal",
+            Self::Accordion => "Accordion",
+            Self::Custom(_) => "Custom",
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct WidgetSpec {
+    pub kind: WidgetKind,
+    pub label: Option<String>,
+    pub binding: Option<String>,
+    pub options: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Kind {
+    Frame(FrameSpec),
+    Shape(ShapeKind),
+    Text(TextSpec),
+    Image { asset: AssetId },
+    Widget(WidgetSpec),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Node {
+    pub id: NodeId,
+    pub name: String,
+    /// Selalu relatif terhadap induk.
+    pub rect: Rect,
+    pub style: Style,
+    pub kind: Kind,
+    pub visible: bool,
+    pub locked: bool,
+    pub children: Vec<Node>,
+}
+
+impl Node {
+    pub fn point(&self) -> Point {
+        self.rect.origin
+    }
+
+    pub fn size(&self) -> Size {
+        self.rect.size
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Asset {
+    pub id: AssetId,
+    pub name: String,
+    pub mime: String,
+    pub bytes: Vec<u8>,
+}
+
+/// Pohon desain statis hasil export. Perilaku ada di `State` dan `user`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Component {
+    pub name: String,
+    pub design_size: Size,
+    pub root: Vec<Node>,
+    pub assets: Vec<Asset>,
+}
+
+impl Component {
+    pub fn asset(&self, id: AssetId) -> Option<&Asset> {
+        self.assets.iter().find(|asset| asset.id == id)
+    }
+
+    pub fn node(&self, id: NodeId) -> Option<&Node> {
+        self.root.iter().find_map(|root| root.find(id))
+    }
+
+    pub fn bindings(&self) -> Vec<String> {
+        let mut found = Vec::new();
+        for root in &self.root {
+            root.walk(&mut |node| {
+                let keys: Vec<&String> = match &node.kind {
+                    Kind::Text(spec) => spec.bindings.iter().collect(),
+                    Kind::Widget(spec) => spec.binding.iter().collect(),
+                    _ => Vec::new(),
+                };
+                for key in keys {
+                    if !found.contains(key) {
+                        found.push(key.clone());
+                    }
+                }
+            });
+        }
+        found
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn component_finds_nodes_and_bindings() {
+        let text = Node {
+            id: 2,
+            name: "Title".into(),
+            rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+            style: Style::default(),
+            kind: Kind::Text(TextSpec {
+                text: "Hi {{name}}".into(),
+                font_family: "sans".into(),
+                font_size: 12.0,
+                bold: false,
+                italic: false,
+                align: Align::Start,
+                vertical_align: TextAlignVertical::Top,
+                line_height: 0.0,
+                color: Color::BLACK,
+                bindings: vec!["name".into()],
+            }),
+            visible: true,
+            locked: false,
+            children: Vec::new(),
+        };
+        let component = Component {
+            name: "test".into(),
+            design_size: Size::new(10.0, 10.0),
+            root: vec![Node {
+                id: 1,
+                name: "root".into(),
+                rect: Rect::new(0.0, 0.0, 10.0, 10.0),
+                style: Style::default(),
+                kind: Kind::Frame(FrameSpec {
+                    layout: Axis::None,
+                    gap: 0.0,
+                    padding: Padding::default(),
+                    align: Align::Start,
+                }),
+                visible: true,
+                locked: false,
+                children: vec![text],
+            }],
+            assets: Vec::new(),
+        };
+        assert!(component.node(2).is_some());
+        assert_eq!(component.bindings(), vec!["name".to_string()]);
+    }
+}

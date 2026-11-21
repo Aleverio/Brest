@@ -3,6 +3,27 @@
 version = 4
 
 [[package]]
+name = "figcraft-emit"
+version = "0.1.0"
+dependencies = [
+ "figcraft-import",
+ "figcraft-ir",
+ "serde_json",
+]
+
+[[package]]
+name = "figcraft-import"
+version = "0.1.0"
+dependencies = [
+ "figcraft-ir",
+ "serde_json",
+]
+
+[[package]]
+name = "figcraft-ir"
+version = "0.1.0"
+
+[[package]]
 name = "figcraft-plugin-sdk"
 version = "0.1.0"
 dependencies = [
@@ -13,9 +34,17 @@ dependencies = [
 name = "figcraft-rust-export"
 version = "0.1.0"
 dependencies = [
+ "figcraft-emit",
+ "figcraft-import",
+ "figcraft-ir",
  "figcraft-plugin-sdk",
+ "figcraft-zip",
  "serde_json",
 ]
+
+[[package]]
+name = "figcraft-zip"
+version = "0.1.0"
 
 [[package]]
 name = "itoa"

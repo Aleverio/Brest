@@ -1,0 +1,110 @@
+//! @generated — state dan event. `State` adalah satu-satunya tempat yang
+//! berubah saat aplikasi berjalan; `Component` tetap statis.
+
+use super::NodeId;
+use std::collections::BTreeMap;
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Text(String),
+    Number(f32),
+    Bool(bool),
+}
+
+impl Value {
+    pub fn as_text(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Number(value) => format!("{value}"),
+            Self::Bool(value) => value.to_string(),
+        }
+    }
+
+    pub fn as_bool(&self) -> bool {
+        match self {
+            Self::Bool(value) => *value,
+            Self::Number(value) => *value != 0.0,
+            Self::Text(text) => !text.is_empty(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct State {
+    values: BTreeMap<String, Value>,
+    pub hovered: Option<NodeId>,
+    pub focused: Option<NodeId>,
+    pub pressed: Option<NodeId>,
+}
+
+impl State {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Isi nilai awal dari binding yang ditemukan di desain.
+    pub fn with_bindings<I, S>(bindings: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let mut state = Self::new();
+        for key in bindings {
+            state.set(key.into().as_str(), Value::Text(String::new()));
+        }
+        state
+    }
+
+    pub fn set(&mut self, key: &str, value: Value) {
+        self.values.insert(key.to_string(), value);
+    }
+
+    pub fn get(&self, key: &str) -> Option<&Value> {
+        self.values.get(key)
+    }
+
+    pub fn text(&self, key: &str) -> Option<String> {
+        self.values.get(key).map(Value::as_text)
+    }
+
+    pub fn bool(&self, key: &str, default: bool) -> bool {
+        self.values.get(key).map(Value::as_bool).unwrap_or(default)
+    }
+
+    pub fn is_hovered(&self, id: NodeId) -> bool {
+        self.hovered == Some(id)
+    }
+
+    pub fn is_pressed(&self, id: NodeId) -> bool {
+        self.pressed == Some(id)
+    }
+
+    pub fn is_focused(&self, id: NodeId) -> bool {
+        self.focused == Some(id)
+    }
+}
+
+/// Event yang dikirim dari `app` ke `user::handlers`.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event {
+    PointerDown(NodeId),
+    PointerUp(NodeId),
+    Hover(Option<NodeId>),
+    Key(String),
+    TextInput(NodeId, String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn state_resolves_values() {
+        let mut state = State::new();
+        state.set("name", Value::Text("Dunia".into()));
+        state.set("count", Value::Number(3.0));
+        assert_eq!(state.text("name").as_deref(), Some("Dunia"));
+        assert_eq!(state.text("count").as_deref(), Some("3"));
+        assert!(!state.bool("missing", false));
+    }
+}

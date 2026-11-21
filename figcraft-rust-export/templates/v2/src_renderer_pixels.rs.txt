@@ -1,0 +1,117 @@
+//! @generated — buffer piksel RGBA8 yang dipakai backend CPU dan GPU.
+
+use crate::core::{Color, Rect};
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RgbaBuffer {
+    pub width: usize,
+    pub height: usize,
+    pub pixels: Vec<u8>,
+}
+
+impl RgbaBuffer {
+    pub fn new(width: f32, height: f32) -> Self {
+        let width = (width.round() as isize).clamp(1, 16_384) as usize;
+        let height = (height.round() as isize).clamp(1, 16_384) as usize;
+        Self {
+            width,
+            height,
+            pixels: vec![0; width * height * 4],
+        }
+    }
+
+    pub fn blend(&mut self, x: i32, y: i32, color: Color, opacity: f32) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
+        let i = (y as usize * self.width + x as usize) * 4;
+        let src_a = (f32::from(color.a) * opacity.clamp(0.0, 1.0)).clamp(0.0, 255.0);
+        let alpha = src_a / 255.0;
+        let dst = &mut self.pixels[i..i + 4];
+        for (offset, &channel) in [color.r, color.g, color.b].iter().enumerate() {
+            dst[offset] = (f32::from(channel) * alpha + f32::from(dst[offset]) * (1.0 - alpha)).round() as u8;
+        }
+        dst[3] = (src_a + f32::from(dst[3]) * (1.0 - alpha)).round() as u8;
+    }
+
+    pub fn rect(&mut self, rect: Rect, color: Color, radius: f32, opacity: f32) {
+        let x0 = rect.left().round() as i32;
+        let y0 = rect.top().round() as i32;
+        let x1 = rect.right().round() as i32;
+        let y1 = rect.bottom().round() as i32;
+        let r = radius.max(0.0).min(rect.size.width.min(rect.size.height) / 2.0);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if r > 0.0 {
+                    let cx = (x as f32 + 0.5 - rect.left()).clamp(r, rect.size.width - r);
+                    let cy = (y as f32 + 0.5 - rect.top()).clamp(r, rect.size.height - r);
+                    let dx = x as f32 + 0.5 - rect.left() - cx;
+                    let dy = y as f32 + 0.5 - rect.top() - cy;
+                    if dx * dx + dy * dy > r * r {
+                        continue;
+                    }
+                }
+                self.blend(x, y, color, opacity);
+            }
+        }
+    }
+
+    pub fn ellipse(&mut self, rect: Rect, color: Color, opacity: f32) {
+        let rx = (rect.size.width / 2.0).max(0.5);
+        let ry = (rect.size.height / 2.0).max(0.5);
+        let cx = rect.left() + rx;
+        let cy = rect.top() + ry;
+        for y in (rect.top() as i32)..(rect.bottom() as i32) {
+            for x in (rect.left() as i32)..(rect.right() as i32) {
+                let dx = (x as f32 + 0.5 - cx) / rx;
+                let dy = (y as f32 + 0.5 - cy) / ry;
+                if dx * dx + dy * dy <= 1.0 {
+                    self.blend(x, y, color, opacity);
+                }
+            }
+        }
+    }
+
+    pub fn line(&mut self, from: crate::core::Point, to: crate::core::Point, color: Color, width: f32) {
+        let dx = to.x - from.x;
+        let dy = to.y - from.y;
+        let steps = dx.abs().max(dy.abs()).round() as i32;
+        let steps = steps.max(1);
+        let half = (width / 2.0).max(0.5);
+        for step in 0..=steps {
+            let t = step as f32 / steps as f32;
+            let x = from.x + dx * t;
+            let y = from.y + dy * t;
+            for py in (y - half).round() as i32..(y + half).round() as i32 {
+                for px in (x - half).round() as i32..(x + half).round() as i32 {
+                    self.blend(px, py, color, 1.0);
+                }
+            }
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.pixels.fill(0);
+    }
+
+    pub fn as_frame(&self) -> crate::core::Frame {
+        crate::core::Frame {
+            size: crate::core::Size::new(self.width as f32, self.height as f32),
+            pixels: self.pixels.clone(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blending_respects_bounds() {
+        let mut buffer = RgbaBuffer::new(2.0, 2.0);
+        buffer.blend(-1, 0, Color::WHITE, 1.0);
+        buffer.blend(1, 1, Color::WHITE, 1.0);
+        assert_eq!(buffer.pixels[(1 * 2 + 1) * 4 + 3], 255);
+        assert_eq!(buffer.pixels[3], 0);
+    }
+}

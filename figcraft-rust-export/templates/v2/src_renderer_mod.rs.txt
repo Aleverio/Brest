@@ -1,0 +1,193 @@
+//! @generated — modul `penggambar`. Backend adalah implementasi, bukan struktur
+//! program: `caller` dan `app` tidak berubah saat backend diganti.
+
+#[cfg(feature = "cpu")]
+pub mod cpu;
+pub mod font;
+pub mod pixels;
+pub mod png;
+#[cfg(feature = "gpu")]
+pub mod gpu;
+#[cfg(feature = "skia")]
+pub mod skia;
+
+use crate::core::{Align, Color, Frame, Point, Rect, Size};
+use std::fmt;
+
+/// Backend dipilih saat runtime lewat `--backend cpu|skia|gpu`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backend {
+    Cpu,
+    Skia,
+    Gpu,
+}
+
+impl Backend {
+    pub fn parse(value: &str) -> Result<Self, RenderError> {
+        match value.to_ascii_lowercase().as_str() {
+            "cpu" | "software" | "soft" => Ok(Self::Cpu),
+            "skia" => Ok(Self::Skia),
+            "gpu" | "wgpu" => Ok(Self::Gpu),
+            other => Err(RenderError::Message(format!(
+                "unknown backend '{other}' (expected cpu, skia or gpu)"
+            ))),
+        }
+    }
+
+    /// Baca `--backend` dari argumen; jika tidak ada, pakai default hasil export.
+    pub fn from_args_or_default(default: &str) -> Result<Self, RenderError> {
+        let mut args = std::env::args().skip(1);
+        let mut selected = default.to_string();
+        while let Some(arg) = args.next() {
+            if arg == "--backend" {
+                selected = args
+                    .next()
+                    .ok_or_else(|| RenderError::Message("--backend needs a value".into()))?;
+            }
+        }
+        Self::parse(&selected)
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Cpu => "cpu",
+            Self::Skia => "skia",
+            Self::Gpu => "gpu",
+        }
+    }
+}
+
+impl fmt::Display for Backend {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum DrawCmd {
+    Rect {
+        rect: Rect,
+        fill: Color,
+        radius: f32,
+        opacity: f32,
+    },
+    StrokeRect {
+        rect: Rect,
+        stroke: Color,
+        width: f32,
+        radius: f32,
+    },
+    Ellipse {
+        rect: Rect,
+        fill: Color,
+        opacity: f32,
+    },
+    Line {
+        from: Point,
+        to: Point,
+        stroke: Color,
+        width: f32,
+    },
+    Text {
+        rect: Rect,
+        text: String,
+        size: f32,
+        color: Color,
+        bold: bool,
+        align: Align,
+    },
+    Image {
+        rect: Rect,
+        bytes: Vec<u8>,
+    },
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct DrawList {
+    pub commands: Vec<DrawCmd>,
+}
+
+impl DrawList {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, command: DrawCmd) {
+        self.commands.push(command);
+    }
+}
+
+#[derive(Debug, PartialEq)]
+pub enum RenderError {
+    BackendDisabled(&'static str),
+    Message(String),
+}
+
+impl fmt::Display for RenderError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BackendDisabled(name) => write!(
+                f,
+                "backend '{name}' was not compiled in; rebuild with --features {name}"
+            ),
+            Self::Message(message) => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for RenderError {}
+
+pub trait Renderer {
+    fn kind(&self) -> Backend;
+    fn render(&mut self, list: &DrawList, size: Size) -> Result<Frame, RenderError>;
+}
+
+#[cfg(feature = "cpu")]
+fn make_cpu() -> Result<Box<dyn Renderer>, RenderError> {
+    Ok(Box::new(cpu::CpuRenderer::new()))
+}
+
+#[cfg(not(feature = "cpu"))]
+fn make_cpu() -> Result<Box<dyn Renderer>, RenderError> {
+    Err(RenderError::BackendDisabled("cpu"))
+}
+
+#[cfg(feature = "skia")]
+fn make_skia() -> Result<Box<dyn Renderer>, RenderError> {
+    Ok(Box::new(skia::SkiaRenderer::new()))
+}
+
+#[cfg(not(feature = "skia"))]
+fn make_skia() -> Result<Box<dyn Renderer>, RenderError> {
+    Err(RenderError::BackendDisabled("skia"))
+}
+
+#[cfg(feature = "gpu")]
+fn make_gpu() -> Result<Box<dyn Renderer>, RenderError> {
+    Ok(Box::new(gpu::GpuRenderer::new()))
+}
+
+#[cfg(not(feature = "gpu"))]
+fn make_gpu() -> Result<Box<dyn Renderer>, RenderError> {
+    Err(RenderError::BackendDisabled("gpu"))
+}
+
+pub fn create(backend: Backend) -> Result<Box<dyn Renderer>, RenderError> {
+    match backend {
+        Backend::Cpu => make_cpu(),
+        Backend::Skia => make_skia(),
+        Backend::Gpu => make_gpu(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn backend_parsing() {
+        assert_eq!(Backend::parse("CPU"), Ok(Backend::Cpu));
+        assert_eq!(Backend::parse("wgpu"), Ok(Backend::Gpu));
+        assert!(Backend::parse("nope").is_err());
+    }
+}

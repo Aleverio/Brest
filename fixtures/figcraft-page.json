@@ -1,0 +1,61 @@
+{
+  "id": "0:1",
+  "name": "Halaman Contoh",
+  "type": "PAGE",
+  "children": [
+    {
+      "id": "1:2",
+      "name": "Card",
+      "type": "FRAME",
+      "absoluteBounds": { "x": 100, "y": 50, "width": 320, "height": 180 },
+      "fills": [{ "type": "SOLID", "color": "#F5F7FA" }],
+      "cornerRadius": 16,
+      "layoutMode": "VERTICAL",
+      "itemSpacing": 12,
+      "paddingTop": 20,
+      "paddingLeft": 20,
+      "children": [
+        {
+          "id": "1:3",
+          "name": "Title",
+          "type": "TEXT",
+          "absoluteBounds": { "x": 120, "y": 70, "width": 240, "height": 28 },
+          "characters": "Halo {{name}}",
+          "fontSize": 20,
+          "fontStyle": "Bold",
+          "textAlign": "LEFT",
+          "fills": [{ "type": "SOLID", "color": "#14181E" }]
+        },
+        {
+          "id": "1:4",
+          "name": "Primary Button",
+          "type": "COMPONENT",
+          "absoluteBounds": { "x": 120, "y": 110, "width": 120, "height": 40 },
+          "fills": [{ "type": "SOLID", "color": "#2B6EF0" }],
+          "cornerRadius": 8,
+          "componentProperties": { "label": "Kirim" },
+          "interactions": [{ "trigger": "ON_CLICK", "action": "SUBMIT" }]
+        },
+        {
+          "id": "1:5",
+          "name": "Gradient Accent",
+          "type": "RECTANGLE",
+          "absoluteBounds": { "x": 120, "y": 160, "width": 60, "height": 20 },
+          "fills": [
+            { "type": "GRADIENT_LINEAR", "color": "#FF8800" },
+            { "type": "SOLID", "color": "#00AA88" }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "2:1",
+      "name": "Avatar",
+      "type": "RECTANGLE",
+      "absoluteBounds": { "x": 440, "y": 50, "width": 48, "height": 48 },
+      "fills": [{ "type": "IMAGE", "imageHash": "avatar-hash" }],
+      "cornerRadius": 24,
+      "visible": true
+    }
+  ]
+}

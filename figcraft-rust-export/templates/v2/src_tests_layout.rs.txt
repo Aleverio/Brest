@@ -1,0 +1,20 @@
+use crate::caller::Caller;
+use crate::component::State;
+use crate::core::{Point, Size};
+
+#[test]
+fn design_fits_the_viewport() {
+    let component = crate::design::build();
+    let layout = Caller::layout(&component, component.design_size);
+    assert!(!layout.rects.is_empty(), "the exported design has no visible layers");
+    let root = layout.get(component.root[0].id).expect("first root is laid out");
+    assert!(root.size.width > 0.0 && root.size.height > 0.0);
+}
+
+#[test]
+fn hit_test_returns_none_outside_the_design() {
+    let component = crate::design::build();
+    let layout = Caller::layout(&component, Size::new(1000.0, 1000.0));
+    assert_eq!(Caller::hit_test(&layout, Point::new(-10.0, -10.0)), None);
+    let _ = State::new();
+}
