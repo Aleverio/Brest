@@ -1,0 +1,31 @@
+//! Exported from FigCraft by `figcraft-rust-export`.
+//! Backend: {{BACKEND}}
+#![allow(dead_code)]
+
+mod caller;
+mod component;
+mod renderer;
+
+use caller::Caller;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let component = component::build();
+
+    #[cfg(feature = "skia")]
+    let renderer = renderer::skia::SkiaRenderer::new();
+    #[cfg(all(not(feature = "skia"), feature = "gpu"))]
+    let renderer = renderer::gpu::GpuRenderer::new();
+    #[cfg(all(not(feature = "skia"), not(feature = "gpu")))]
+    let renderer = renderer::cpu::CpuRenderer::new();
+
+    let mut caller = Caller::new(renderer);
+    // Insert runtime values for `{{key}}` placeholders from the design:
+    // caller.set("title", caller::Value::from("Hello"));
+
+    let png = caller
+        .draw(&component)
+        .map_err(|e| std::io::Error::other(format!("render failed: {e:?}")))?;
+    std::fs::write("{{CRATE}}.png", png)?;
+    println!("wrote {{CRATE}}.png");
+    Ok(())
+}

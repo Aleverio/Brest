@@ -1,0 +1,34 @@
+# Workspace for the FigCraft "Export to Rust" plugin.
+#
+# `sdk` is a verbatim copy of the official `figcraft-plugin-sdk` from
+# https://github.com/storytold/figcraft/tree/main/plugins/sdk (MIT OR Apache-2.0).
+# It is vendored so this plugin builds on its own, without cloning FigCraft.
+
+[workspace]
+resolver = "3"
+members = ["sdk", "figcraft-rust-export"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.95"
+
+[workspace.dependencies]
+figcraft-plugin-sdk = { path = "sdk" }
+serde_json = { version = "1", default-features = false, features = ["alloc"] }
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

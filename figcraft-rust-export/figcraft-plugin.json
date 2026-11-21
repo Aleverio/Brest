@@ -1,0 +1,39 @@
+{
+  "id": "dev.brest.figcraft.rust-export",
+  "name": "Export to Rust",
+  "version": "0.1.0",
+  "description": "Exports FigCraft layers as a Rust UI project: component, caller and a CPU, Skia or GPU renderer.",
+  "author": "Brest",
+  "main": "figcraft_rust_export.wasm",
+  "api": 4,
+  "permissions": {
+    "access": "read",
+    "commands": ["node.get", "page.list", "inspect.designContext", "inspect.code"],
+    "saveFile": true
+  },
+  "commands": [
+    {
+      "id": "export",
+      "label": "Export to Rust…",
+      "params": [
+        {
+          "name": "backend",
+          "label": "Renderer",
+          "type": "select",
+          "options": ["Skia", "CPU", "GPU"],
+          "default": "Skia"
+        },
+        {
+          "name": "crate",
+          "label": "Crate name",
+          "type": "text",
+          "default": "figcraft_design"
+        }
+      ]
+    },
+    {
+      "id": "panel",
+      "label": "Export to Rust (panel)…"
+    }
+  ]
+}

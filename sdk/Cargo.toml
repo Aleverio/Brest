@@ -1,0 +1,13 @@
+[package]
+name = "figcraft-plugin-sdk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Write FigCraft plugins in Rust: the plugin ABI (host functions, the entry point) wrapped with serde_json"
+repository = "https://github.com/storytold/figcraft"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = { workspace = true }

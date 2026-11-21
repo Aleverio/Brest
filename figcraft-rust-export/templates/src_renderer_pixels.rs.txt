@@ -1,0 +1,160 @@
+//! Shared pixel buffer and a dependency-free PNG encoder (stored DEFLATE blocks).
+
+use crate::component::{Rect, Rgba};
+
+#[derive(Clone, Debug)]
+pub struct RgbaBuffer {
+    pub width: usize,
+    pub height: usize,
+    pub pixels: Vec<u8>,
+}
+
+impl RgbaBuffer {
+    pub fn new(width: f32, height: f32) -> Self {
+        let width = (width.round() as isize).clamp(1, 8192) as usize;
+        let height = (height.round() as isize).clamp(1, 8192) as usize;
+        Self { width, height, pixels: vec![0; width * height * 4] }
+    }
+
+    pub fn blend(&mut self, x: i32, y: i32, color: Rgba, opacity: f32) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
+        let i = (y as usize * self.width + x as usize) * 4;
+        let src_a = (f32::from(color.a) * opacity.clamp(0.0, 1.0)).clamp(0.0, 255.0);
+        let a = src_a / 255.0;
+        let dst = &mut self.pixels[i..i + 4];
+        for (k, &c) in [color.r, color.g, color.b].iter().enumerate() {
+            dst[k] = (f32::from(c) * a + f32::from(dst[k]) * (1.0 - a)).round() as u8;
+        }
+        dst[3] = (src_a + f32::from(dst[3]) * (1.0 - a)).round() as u8;
+    }
+
+    pub fn rect(&mut self, rect: Rect, color: Rgba, radius: f32, opacity: f32) {
+        let x0 = rect.x.round() as i32;
+        let y0 = rect.y.round() as i32;
+        let x1 = (rect.x + rect.width).round() as i32;
+        let y1 = (rect.y + rect.height).round() as i32;
+        let r = radius.max(0.0).min(rect.width.min(rect.height) / 2.0);
+        for y in y0..y1 {
+            for x in x0..x1 {
+                if r > 0.0 {
+                    let cx = (x as f32 + 0.5 - rect.x).clamp(r, rect.width - r);
+                    let cy = (y as f32 + 0.5 - rect.y).clamp(r, rect.height - r);
+                    let dx = x as f32 + 0.5 - rect.x - cx;
+                    let dy = y as f32 + 0.5 - rect.y - cy;
+                    if dx * dx + dy * dy > r * r {
+                        continue;
+                    }
+                }
+                self.blend(x, y, color, opacity);
+            }
+        }
+    }
+
+    pub fn ellipse(&mut self, rect: Rect, color: Rgba, opacity: f32) {
+        let rx = (rect.width / 2.0).max(0.5);
+        let ry = (rect.height / 2.0).max(0.5);
+        let cx = rect.x + rx;
+        let cy = rect.y + ry;
+        for y in (rect.y as i32)..((rect.y + rect.height) as i32) {
+            for x in (rect.x as i32)..((rect.x + rect.width) as i32) {
+                let dx = (x as f32 + 0.5 - cx) / rx;
+                let dy = (y as f32 + 0.5 - cy) / ry;
+                if dx * dx + dy * dy <= 1.0 {
+                    self.blend(x, y, color, opacity);
+                }
+            }
+        }
+    }
+
+    pub fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, color: Rgba, width: f32) {
+        let steps = ((x2 - x1).abs().max((y2 - y1).abs()).round() as i32).max(1);
+        let half = (width / 2.0).max(0.5);
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let x = x1 + (x2 - x1) * t;
+            let y = y1 + (y2 - y1) * t;
+            let x0 = (x - half).round() as i32;
+            let y0 = (y - half).round() as i32;
+            let xh = (x + half).round() as i32;
+            let yh = (y + half).round() as i32;
+            for py in y0..yh {
+                for px in x0..xh {
+                    self.blend(px, py, color, 1.0);
+                }
+            }
+        }
+    }
+
+    /// Encode the buffer as PNG with no external crates.
+    pub fn png(&self) -> Vec<u8> {
+        let mut raw = Vec::with_capacity(self.height * (self.width * 4 + 1));
+        for row in self.pixels.chunks(self.width * 4) {
+            raw.push(0); // filter: none
+            raw.extend_from_slice(row);
+        }
+        let compressed = stored_deflate(&raw);
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        chunk(&mut png, b"IHDR", &ihdr(self.width, self.height));
+        chunk(&mut png, b"IDAT", &compressed);
+        chunk(&mut png, b"IEND", &[]);
+        png
+    }
+}
+
+fn ihdr(width: usize, height: usize) -> Vec<u8> {
+    let mut out = Vec::with_capacity(13);
+    out.extend_from_slice(&(width as u32).to_be_bytes());
+    out.extend_from_slice(&(height as u32).to_be_bytes());
+    out.extend_from_slice(&[8, 6, 0, 0, 0]); // 8-bit RGBA
+    out
+}
+
+fn chunk(out: &mut Vec<u8>, kind: &[u8; 4], data: &[u8]) {
+    out.extend_from_slice(&(data.len() as u32).to_be_bytes());
+    out.extend_from_slice(kind);
+    out.extend_from_slice(data);
+    out.extend_from_slice(&crc32(&[kind, data].concat()).to_be_bytes());
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for &b in bytes {
+        crc ^= u32::from(b);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xEDB8_8320 & 0u32.wrapping_sub(crc & 1));
+        }
+    }
+    !crc
+}
+
+/// DEFLATE with stored blocks (no compression), framed in a zlib stream.
+fn stored_deflate(data: &[u8]) -> Vec<u8> {
+    let mut out = vec![0x78, 0x01];
+    let mut pos = 0;
+    loop {
+        let take = (data.len() - pos).min(65535);
+        let last = u8::from(pos + take == data.len());
+        out.push(last);
+        out.extend_from_slice(&(take as u16).to_le_bytes());
+        out.extend_from_slice(&(!(take as u16)).to_le_bytes());
+        out.extend_from_slice(&data[pos..pos + take]);
+        pos += take;
+        if last == 1 {
+            break;
+        }
+    }
+    let adler = adler32(data);
+    out.extend_from_slice(&adler.to_be_bytes());
+    out
+}
+
+fn adler32(data: &[u8]) -> u32 {
+    let (mut a, mut b) = (1u32, 0u32);
+    for &x in data {
+        a = (a + u32::from(x)) % 65521;
+        b = (b + a) % 65521;
+    }
+    (b << 16) | a
+}

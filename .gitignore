@@ -1,0 +1,4 @@
+/target/
+**/*.wasm
+/dist/
+figcraft-rust-export/dist/

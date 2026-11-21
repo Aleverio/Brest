@@ -1,0 +1,140 @@
+//! MODUL 2/3 - "pemanggil": resolves layout and values, then calls the renderer.
+//! It knows nothing about Skia, wgpu or pixels; only the `Renderer` trait.
+
+use crate::component::{Align, Axis, Component, Kind, Node, Rect, Rgba};
+use crate::renderer::Renderer;
+use std::collections::BTreeMap;
+
+/// A value that can be inserted into a component before drawing.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    Text(String),
+    Number(f32),
+    Flag(bool),
+    Color(Rgba),
+}
+
+impl From<&str> for Value {
+    fn from(v: &str) -> Self {
+        Self::Text(v.to_string())
+    }
+}
+
+impl From<String> for Value {
+    fn from(v: String) -> Self {
+        Self::Text(v)
+    }
+}
+
+impl From<f32> for Value {
+    fn from(v: f32) -> Self {
+        Self::Number(v)
+    }
+}
+
+impl From<bool> for Value {
+    fn from(v: bool) -> Self {
+        Self::Flag(v)
+    }
+}
+
+/// The bridge between generated components and the drawing backend.
+pub struct Caller<R: Renderer> {
+    pub renderer: R,
+    pub values: BTreeMap<String, Value>,
+}
+
+impl<R: Renderer> Caller<R> {
+    pub fn new(renderer: R) -> Self {
+        Self { renderer, values: BTreeMap::new() }
+    }
+
+    /// Set a value for any `{{key}}` placeholder in the design.
+    pub fn set(&mut self, key: impl Into<String>, value: impl Into<Value>) -> &mut Self {
+        self.values.insert(key.into(), value.into());
+        self
+    }
+
+    /// Draw the whole component and return a PNG image.
+    pub fn draw(&mut self, component: &Component) -> Result<Vec<u8>, R::Error> {
+        self.renderer.begin(component.width, component.height)?;
+        for node in &component.root {
+            self.node(component, node, 0.0, 0.0)?;
+        }
+        self.renderer.finish()
+    }
+
+    fn node(&mut self, component: &Component, node: &Node, ox: f32, oy: f32) -> Result<(), R::Error> {
+        if !node.visible {
+            return Ok(());
+        }
+        let rect = Rect { x: ox + node.rect.x, y: oy + node.rect.y, ..node.rect };
+        let style = node.style;
+        let opacity = style.opacity;
+
+        match &node.kind {
+            Kind::Frame { .. } | Kind::Rectangle => {
+                if let Some(fill) = style.fill {
+                    self.renderer.fill_rect(rect, fill, style.radius, opacity)?;
+                }
+                if let Some(stroke) = style.stroke {
+                    self.renderer.stroke_rect(rect, stroke, style.stroke_width, style.radius)?;
+                }
+            }
+            Kind::Ellipse => {
+                if let Some(fill) = style.fill {
+                    self.renderer.fill_ellipse(rect, fill, opacity)?;
+                }
+            }
+            Kind::Line { x2, y2 } => {
+                let stroke = style.stroke.or(style.fill).unwrap_or(Rgba::new(0, 0, 0, 255));
+                self.renderer.line(rect.x, rect.y, rect.x + x2, rect.y + y2, stroke, style.stroke_width.max(1.0))?;
+            }
+            Kind::Text { text, font_size, bold, color, align } => {
+                let text = component.resolve_with(text, &self.values);
+                let width = text.chars().count() as f32 * font_size * 0.6;
+                let x = match align {
+                    Align::Start => rect.x,
+                    Align::Center => rect.x + (rect.width - width) / 2.0,
+                    Align::End => rect.x + rect.width - width,
+                };
+                self.renderer.text(Rect { x, ..rect }, &text, *font_size, *color, *bold)?;
+            }
+            Kind::Image { path } => {
+                self.renderer.image(rect, path)?;
+            }
+        }
+
+        // Children are positioned in their parent's coordinate space. Frames
+        // with an auto layout flow their children; other frames stack them as
+        // they were captured from FigCraft.
+        let mut cx = rect.x;
+        let mut cy = rect.y;
+        if let Kind::Frame { layout: Some(Axis::Horizontal), gap, padding } = node.kind {
+            cx += padding;
+            cy += padding;
+            for child in &node.children {
+                self.node(component, child, cx - node.rect.x, cy - node.rect.y)?;
+                cx += child.rect.width + gap;
+            }
+        } else if let Kind::Frame { layout: Some(Axis::Vertical), gap, padding } = node.kind {
+            cx += padding;
+            cy += padding;
+            for child in &node.children {
+                self.node(component, child, cx - node.rect.x, cy - node.rect.y)?;
+                cy += child.rect.height + gap;
+            }
+        } else {
+            for child in &node.children {
+                self.node(component, child, rect.x, rect.y)?;
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Convenience for the generated `main`: pick the backend export chose.
+pub fn render_default<R: Renderer<Error = String> + Default>(component: &Component) -> Result<Vec<u8>, String> {
+    let mut caller = Caller::<R>::new(R::default());
+    caller.draw(component)
+}

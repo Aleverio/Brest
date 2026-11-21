@@ -1,0 +1,12 @@
+
+/// Build the component tree from the exported FigCraft design.
+pub fn build() -> Component {
+    let mut component = Component::new();
+    component.name = {{SCENE_NAME}}.to_string();
+    component.width = {{WIDTH}};
+    component.height = {{HEIGHT}};
+    component.root = vec![
+{{NODES}}
+    ];
+    component
+}

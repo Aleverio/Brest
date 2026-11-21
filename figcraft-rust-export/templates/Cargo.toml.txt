@@ -1,0 +1,15 @@
+[package]
+name = "{{CRATE}}"
+version = "0.1.0"
+edition = "2024"
+
+# Stand on its own, even when unzipped inside another Cargo workspace.
+[workspace]
+
+# The three export methods described by the plugin. Switch at build time with
+# `cargo run --no-default-features --features cpu|skia|gpu`.
+[features]
+default = ["{{BACKEND}}"]
+cpu = []
+{{EXTRA_FEATURES}}
+{{EXTRA_DEPS}}

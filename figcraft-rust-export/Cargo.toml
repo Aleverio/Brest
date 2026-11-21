@@ -1,0 +1,20 @@
+[package]
+name = "figcraft-rust-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "FigCraft plugin: export a design as a Rust UI project (Skia / CPU / GPU renderers)"
+repository = "https://github.com/storytold/figcraft"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[lints]
+workspace = true
+
+[dependencies]
+figcraft-plugin-sdk = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
